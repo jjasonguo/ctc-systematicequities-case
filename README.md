@@ -1,0 +1,1 @@
+# ctc-systematicequities-case
