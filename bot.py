@@ -496,7 +496,29 @@ class Trader:
         return round(legs["AAA"] + legs["BBB"] + legs["CCC"], 2)
 
 
+    def place_basket_orders(self, side: str, qty: int):
+        """
+        Place orders for 1 unit each of AAA, BBB, CCC to hedge ETF arbitrage.
+        Uses passive limit orders at favorable prices.
+        """
+        for symbol in ["AAA", "BBB", "CCC"]:
+            px = safe_price(self.api, self.key, symbol)
+            if px is not None:
+                # Clamp quantity to respect position limits
+                pos = self.positions.get(symbol, 0)
+                clamped_qty = self.risk.clamp_qty(qty if side == "buy" else -qty, pos)
+                
+                if abs(clamped_qty) > 0:
+                    # Passive execution: offer below market when buying, above when selling
+                    limit_px = px - 0.01 if side == "buy" else px + 0.01
+                    limit_px = max(0.01, round(limit_px, 2))
+                    place_order(self.api, self.key, symbol, side, abs(clamped_qty), "limit", limit_px)
+
     def etf_arb(self):
+        """
+        Enhanced ETF arbitrage: simultaneously trade ETF and basket components
+        to create a true market-neutral arbitrage position.
+        """
         # only consider ETF arb every 5 ticks to avoid spam
         if self.tick % 5 != 0:
             return
@@ -512,19 +534,29 @@ class Trader:
         edge = fair - etf
         threshold = self.config.etf_arb_threshold
 
+        # Determine arbitrage quantity, respecting risk limits
+        arb_qty = min(self.config.etf_arb_qty, self.risk.per_trade)
+
         # Post at the touch *passively*, never chase
         if edge > threshold:
-            # ETF cheap vs basket → want to buy ETF, bid just below current mid/last
-            qty = self.risk.clamp_qty(+self.config.etf_arb_qty, self.positions.get("ETF", 0))
-            if qty > 0:
+            # ETF cheap vs basket → BUY ETF, SELL basket
+            etf_qty = self.risk.clamp_qty(+arb_qty, self.positions.get("ETF", 0))
+            if etf_qty > 0:
+                # Place ETF buy order
                 px = max(0.01, round(etf - 0.01, 2))
-                place_order(self.api, self.key, "ETF", "buy", qty, "limit", px)
+                place_order(self.api, self.key, "ETF", "buy", etf_qty, "limit", px)
+                # Simultaneously sell the basket components
+                self.place_basket_orders("sell", etf_qty)
+                
         elif edge < -threshold:
-            # ETF rich → want to sell ETF, offer just above current price
-            qty = self.risk.clamp_qty(-self.config.etf_arb_qty, self.positions.get("ETF", 0))
-            if qty < 0:
+            # ETF rich → SELL ETF, BUY basket
+            etf_qty = self.risk.clamp_qty(-arb_qty, self.positions.get("ETF", 0))
+            if etf_qty < 0:
+                # Place ETF sell order
                 px = round(etf + 0.01, 2)
-                place_order(self.api, self.key, "ETF", "sell", -qty, "limit", px)
+                place_order(self.api, self.key, "ETF", "sell", -etf_qty, "limit", px)
+                # Simultaneously buy the basket components
+                self.place_basket_orders("buy", -etf_qty)
         
         self._mark_sent("ETF")
 
