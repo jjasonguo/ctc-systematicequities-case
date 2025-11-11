@@ -701,13 +701,13 @@ class Trader:
             self.etf_arb()
 
         # Run signals on AAA *and* BBB (BBB has a momentum alpha wired already)
-        # self.signal_trade("AAA")
-        # self.signal_trade("BBB")
+        self.signal_trade("AAA")
+        self.signal_trade("BBB")
 
         # Always keep makers up on all three legs
-        # self.inventory_maker("AAA")
-        # self.inventory_maker("BBB")
-        # self.inventory_maker("CCC")
+        self.inventory_maker("AAA")
+        self.inventory_maker("BBB")
+        self.inventory_maker("CCC")
 
         # Periodic cleanup (not too frequent so we can hold queue priority)
         if self.tick % self.config.cancel_frequency == 0:
